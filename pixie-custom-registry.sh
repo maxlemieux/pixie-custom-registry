@@ -1,5 +1,8 @@
 #!/bin/bash
+
+# Based on Pixie docs at https://docs.pixielabs.ai/reference/admin/deploy-options#custom-image-registry
 # Supports AWS ECR registries. You must have a registry and provide a URL for it.
+
 # Usage: REGISTRY_URL=12345.dkr.ecr.us-east-1.amazonaws.com AWS_REGION=us-east-1 ./pixie-custom-registry.sh
 
 VERBOSE=0
