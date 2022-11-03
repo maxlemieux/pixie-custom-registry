@@ -1,10 +1,18 @@
-#!/bin/sh
+#!/bin/bash
 # Supports AWS ECR registries. You must have a registry and provide a URL for it.
 # Usage: REGISTRY_URL=12345.dkr.ecr.us-east-1.amazonaws.com AWS_REGION=us-east-1 ./pixie-custom-registry.sh
 
+VERBOSE=0
+# check for verbose mode
+if [ "$1" = "-v" ]; then 
+    VERBOSE=1
+fi
+
 # Called when a needed repo already exists
 warn_repo_exists () {
-    echo "Repository already exists, not creating"
+    if [ "$VERBOSE" = "1" ]; then
+        echo "Repository already exists, not creating"
+    fi
 }
 
 # Don't run if we have previous runs around
@@ -33,87 +41,111 @@ curl https://storage.googleapis.com/pixie-dev-public/vizier/latest/vizier_yamls.
 
 echo "Logging into custom registry"
 # Login to AWS ECR (replace this if you need to use a different registry)
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY_URL
+aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_URL" >> /dev/null 2>&1
 
 # Create the repositories using the naming convention defined by Pixie
 # https://docs.pixielabs.ai/reference/admin/deploy-options#custom-image-registry-collect-the-vizier-images
-for i in $(cat yamls/images/vizier_image_list.txt)
-do 
-    echo $i | xargs docker pull
+ 
+#for i in $(cat yamls/images/vizier_image_list.txt)
+#do
 
-    NEW_IMAGE_NAME=$(echo $i | cut -f 1 -d ':' | cut -f 2 -d '"' | sed 's/\//-/g')
-    aws ecr describe-repositories --repository-name $NEW_IMAGE_NAME >> /dev/null 2>&1 && warn_repo_exists || aws ecr create-repository --repository-name $NEW_IMAGE_NAME 
+# while loop
+while read -r i
+do  
+    echo "$i" | xargs docker pull >> /dev/null 2>&1
 
-    PIXIE_IMAGE_NAME=$(echo $i | cut -f 1 -d ':'  | rev | cut -d '/' -f 1 | rev)
-    PIXIE_IMAGE_ID=$(docker images | grep $PIXIE_IMAGE_NAME | cut -f 3 -w | tail -1)
-    CUSTOM_IMAGE_NAME=$(echo $i | cut -f 1 -d ':' | cut -f 2 -d '"' | sed 's/\//-/g')
-    IMAGE_VERSION=$(docker images | grep $PIXIE_IMAGE_NAME | grep -v $REGISTRY_URL | cut -f 2 -w)
+    NEW_IMAGE_NAME=$(echo "$i" | cut -f 1 -d ':' | cut -f 2 -d '"' | sed 's/\//-/g')
+    if aws ecr describe-repositories --no-cli-pager --repository-name "$NEW_IMAGE_NAME" >> /dev/null 2>&1; then
+        warn_repo_exists
+    else
+        aws ecr create-repository --no-cli-pager --repository-name "$NEW_IMAGE_NAME" >> /dev/null 2>&1
+    fi
 
-    docker tag $PIXIE_IMAGE_ID $REGISTRY_URL/$CUSTOM_IMAGE_NAME
-    docker push $REGISTRY_URL/$CUSTOM_IMAGE_NAME\:$IMAGE_VERSION
-done
+    PIXIE_IMAGE_NAME=$(echo "$i" | cut -f 1 -d ':'  | rev | cut -d '/' -f 1 | rev)
+    #echo "Pixie image name: $PIXIE_IMAGE_NAME"
+    PIXIE_IMAGE_ID=$(docker images | grep "$PIXIE_IMAGE_NAME" | cut -f 3 -w | tail -1)
+    #echo "Pixie image id: $PIXIE_IMAGE_ID"
+    CUSTOM_IMAGE_NAME=$(echo "$i" | cut -f 1 -d ':' | cut -f 2 -d '"' | sed 's/\//-/g')
+    #echo "Custom image name: $CUSTOM_IMAGE_NAME"
+    IMAGE_VERSION=$(docker images | grep "$PIXIE_IMAGE_NAME" | grep -v "$REGISTRY_URL" | cut -f 2 -w)
+    #echo "Pixie image version: $IMAGE_VERSION"
+
+    docker tag "$PIXIE_IMAGE_ID" "$REGISTRY_URL"/"$CUSTOM_IMAGE_NAME":"$IMAGE_VERSION" >> /dev/null 2>&1
+    docker push "$REGISTRY_URL"/"$CUSTOM_IMAGE_NAME":"$IMAGE_VERSION" >> /dev/null 2>&1
+done < yamls/images/vizier_image_list.txt
+#done
 
 #####
 # OPM
 #####
 
-echo "Downloading opm"
-opm index export --index gcr.io/pixie-oss/pixie-prod/operator/bundle_index:0.0.1
+echo "Building operator bundle"
+opm index export --index gcr.io/pixie-oss/pixie-prod/operator/bundle_index:0.0.1 >> /dev/null 2>&1
 
 # Get the latest version number (e.g. 0.0.32):
 PIXIE_OPERATOR_VERSION=$(grep -A1 stable -m 1 downloaded/pixie-operator/package.yaml | grep current | cut -f 2 -d 'v')
 echo "Got Pixie Operator version $PIXIE_OPERATOR_VERSION"
 
 # Delete the replaces line (this is for Mac using BSD sed, use sed -i '/replaces/d' on Linux):
-sed -i '' '/replaces/d' ./downloaded/pixie-operator/$PIXIE_OPERATOR_VERSION/csv.yaml
+sed -i '' '/replaces/d' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
 # Check for the image attribute to be replaced with the custom repo URL:
 # e.g. - image: gcr.io/pixie-oss/pixie-prod/operator/operator_image:0.0.32
-echo "Replacing the image attribute with the custom repo URL."
-IMAGE_TO_REPLACE=$(grep image ./downloaded/pixie-operator/$PIXIE_OPERATOR_VERSION/csv.yaml | cut -f 4 -w)
-sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' ./downloaded/pixie-operator/$PIXIE_OPERATOR_VERSION/csv.yaml
+IMAGE_TO_REPLACE=$(grep image ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml | cut -f 4 -w)
+sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
 # Replace this if you don't use AWS ECR
-aws ecr create-repository --repository-name bundle
+aws ecr create-repository --repository-name bundle >> /dev/null 2>&1
 
 # Building and pushing operator images to the custom registry
-opm alpha bundle generate --package pixie-operator --channels stable --default stable --directory downloaded/pixie-operator/0.0.32
-docker build -t $REGISTRY_URL/bundle:0.0.32 -f bundle.Dockerfile .
-docker push $REGISTRY_URL/bundle:0.0.32   
+opm alpha bundle generate --package pixie-operator --channels stable --default stable --directory downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
+docker build -t "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" -f bundle.Dockerfile . >> /dev/null 2>&1
+docker push "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
 
 # Create bundle index, repo for bundle index, and push the image
-opm index add --bundles $REGISTRY_URL/bundle:0.0.32 --tag $REGISTRY_URL/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 -u docker
+opm index add --bundles "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" --tag "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 -u docker >> /dev/null 2>&1
 OPERATOR_BUNDLE_REPO=gcr.io-pixie-oss-pixie-prod-operator-bundle_index
-aws ecr describe-repositories --repository-name $OPERATOR_BUNDLE_REPO >> /dev/null 2>&1 && warn_repo_exists || aws ecr create-repository --repository-name $OPERATOR_BUNDLE_REPO
-docker push $REGISTRY_URL/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1
+if aws ecr describe-repositories --no-cli-pager --repository-name "$OPERATOR_BUNDLE_REPO" >> /dev/null 2>&1; then
+    warn_repo_exists
+else
+    aws ecr create-repository --no-cli-pager --repository-name "$OPERATOR_BUNDLE_REPO" >> /dev/null 2>&1
+fi
+docker push "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 >> /dev/null 2>&1
 
 # And finally, install these dependencies
-docker pull quay.io/operator-framework/olm
-docker pull quay.io/operator-framework/configmap-operator-registry
+docker pull quay.io/operator-framework/olm >> /dev/null 2>&1
+docker pull quay.io/operator-framework/configmap-operator-registry >> /dev/null 2>&1
 
 # Create ECR repos (change if not using ECR)
 OLM_REPO=quay.io-operator-framework-olm
-aws ecr describe-repositories --repository-name $OLM_REPO >> /dev/null 2>&1 && warn_repo_exists || aws ecr create-repository --repository-name $OLM_REPO
+if aws ecr describe-repositories --no-cli-pager --repository-name "$OLM_REPO" >> /dev/null 2>&1; then
+    warn_repo_exists
+else
+    aws ecr create-repository --no-cli-pager --repository-name "$OLM_REPO" >> /dev/null 2>&1
+fi
 
 CONFIGMAP_REPO=quay.io-operator-framework-configmap-operator-registry
-aws ecr describe-repositories --repository-name $CONFIGMAP_REPO >> /dev/null 2>&1 && warn_repo_exists || aws ecr create-repository --repository-name $CONFIGMAP_REPO
+if aws ecr describe-repositories --no-cli-pager --repository-name "$CONFIGMAP_REPO" >> /dev/null 2>&1; then
+    warn_repo_exists
+else
+    aws ecr create-repository --no-cli-pager --repository-name "$CONFIGMAP_REPO" >> /dev/null 2>&1
+fi
 
 # Docker tag and push
 OLM_IMAGE_ID=$(docker images | grep "operator-framework/olm" | cut -f 3 -w | head -1)
-echo $OLM_IMAGE_ID
-docker tag $OLM_IMAGE_ID $REGISTRY_URL/quay.io-operator-framework-olm:latest
-docker push $REGISTRY_URL/quay.io-operator-framework-olm:latest
+#echo "OLM image ID: $OLM_IMAGE_ID"
+docker tag "$OLM_IMAGE_ID" "$REGISTRY_URL"/quay.io-operator-framework-olm:latest >> /dev/null 2>&1
+docker push "$REGISTRY_URL"/quay.io-operator-framework-olm:latest >> /dev/null 2>&1
 
 CONFIGMAP_IMAGE_ID=$(docker images | grep "configmap-operator-registry" | cut -f 3 -w | head -1)
-echo $CONFIGMAP_IMAGE_ID
-docker tag $CONFIGMAP_IMAGE_ID $REGISTRY_URL/quay.io-operator-framework-configmap-operator-registry:latest
-docker push $REGISTRY_URL/quay.io-operator-framework-configmap-operator-registry:latest
+#echo "Configmap image ID: $CONFIGMAP_IMAGE_ID"
+docker tag "$CONFIGMAP_IMAGE_ID" "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
+docker push "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
 
 
 #########
 # CLEANUP  
 #########
-# or just download to a new temp directory each time...
 # rm -rf downloaded
 # rm -rf yamls
 # rm -rf bundle.Dockerfile
