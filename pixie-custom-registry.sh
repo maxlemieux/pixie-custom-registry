@@ -41,15 +41,19 @@ curl https://storage.googleapis.com/pixie-dev-public/vizier/latest/vizier_yamls.
 
 echo "Logging into custom registry"
 # Login to AWS ECR (replace this if you need to use a different registry)
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_URL" >> /dev/null 2>&1
+#aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_URL" $OUTPUT
+AWS_LOGIN_COMMAND=("aws" "ecr" "get-login-password" "--region" "$AWS_REGION")
+DOCKER_LOGIN_COMMAND=("docker" "login" "--username" "AWS" "--password-stdin" "$REGISTRY_URL")
 
+if [ "$VERBOSE" = "0" ]; then
+    "${AWS_LOGIN_COMMAND[@]}" | "${DOCKER_LOGIN_COMMAND[@]}" >> /dev/null 2>&1
+elif [ "$VERBOSE" = "1" ]; then
+    "${AWS_LOGIN_COMMAND[@]}" | "${DOCKER_LOGIN_COMMAND[@]}"
+fi
+
+echo "Creating and populating container repositories"
 # Create the repositories using the naming convention defined by Pixie
 # https://docs.pixielabs.ai/reference/admin/deploy-options#custom-image-registry-collect-the-vizier-images
- 
-#for i in $(cat yamls/images/vizier_image_list.txt)
-#do
-
-# while loop
 while read -r i
 do  
     echo "$i" | xargs docker pull >> /dev/null 2>&1
@@ -112,6 +116,7 @@ else
 fi
 docker push "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 >> /dev/null 2>&1
 
+echo "Building dependencies"
 # And finally, install these dependencies
 docker pull quay.io/operator-framework/olm >> /dev/null 2>&1
 docker pull quay.io/operator-framework/configmap-operator-registry >> /dev/null 2>&1
@@ -148,4 +153,4 @@ docker push "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-regist
 #########
 # rm -rf downloaded
 # rm -rf yamls
-# rm -rf bundle.Dockerfile
+# rm bundle.Dockerfile
