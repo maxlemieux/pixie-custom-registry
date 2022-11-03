@@ -16,20 +16,14 @@ warn_repo_exists () {
 }
 
 # Don't run if we have previous runs around
-if test -e "yamls"; then
-    echo "yamls directory exists, please remove it."
-    exit
-fi
-
-if test -e "downloads"; then
-    echo "downloads directory exists, please remove it"
-    exit
-fi
-
-if test -f "bundle.Dockerfile"; then
-    echo "bundle.Dockerfile exists, please remove it"
-    exit
-fi
+BUILD_FILES=( yamls downloaded bundle.Dockerfile )
+for i in "${BUILD_FILES[@]}"
+do
+    if test -e $i; then
+        echo "Directory or build file exists, please remove it:" $i
+        exit
+    fi
+done
 
 ########
 # Vizier
@@ -119,6 +113,7 @@ docker push "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.
 echo "Building dependencies"
 # And finally, install these dependencies
 docker pull quay.io/operator-framework/olm >> /dev/null 2>&1
+docker pull quay.io/operator-framework/olm@sha256:b706ee6583c4c3cf8059d44234c8a4505804adcc742bcddb3d1e2f6eff3d6519 >> /dev/null 2>&1
 docker pull quay.io/operator-framework/configmap-operator-registry >> /dev/null 2>&1
 
 # Create ECR repos (change if not using ECR)
@@ -136,14 +131,14 @@ else
     aws ecr create-repository --no-cli-pager --repository-name "$CONFIGMAP_REPO" >> /dev/null 2>&1
 fi
 
-# Docker tag and push
-OLM_IMAGE_ID=$(docker images | grep "operator-framework/olm" | cut -f 3 -w | head -1)
-#echo "OLM image ID: $OLM_IMAGE_ID"
+# Docker tag and push for Operator Framework
+# This is the id for quay.io/operator-framework/olm@sha256:b706ee6583c4c3cf8059d44234c8a4505804adcc742bcddb3d1e2f6eff3d6519
+OLM_IMAGE_ID="93b0a108131b"
 docker tag "$OLM_IMAGE_ID" "$REGISTRY_URL"/quay.io-operator-framework-olm:latest >> /dev/null 2>&1
 docker push "$REGISTRY_URL"/quay.io-operator-framework-olm:latest >> /dev/null 2>&1
 
+# Configmap image id
 CONFIGMAP_IMAGE_ID=$(docker images | grep "configmap-operator-registry" | cut -f 3 -w | head -1)
-#echo "Configmap image ID: $CONFIGMAP_IMAGE_ID"
 docker tag "$CONFIGMAP_IMAGE_ID" "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
 docker push "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
 

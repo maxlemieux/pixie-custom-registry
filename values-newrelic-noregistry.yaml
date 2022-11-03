@@ -1,0 +1,95 @@
+global:
+  licenseKey: 32c395f4087e7abca947922ed64142b1b7e4NRAL
+  cluster: mlemieux-atg-eks
+  lowDataMode: true
+
+ksm:
+  enabled: true
+
+kubeEvents:
+  enabled: true
+
+logging:
+  enabled: true
+
+prometheus:
+  enabled: true
+
+newrelic-pixie:
+  enabled: true
+  apiKey: 63306b60-ee11-4767-bbb7-683da9908934
+
+pixie-chart:
+  enabled: true
+  deployKey: 4f4a61fc-ca6a-4e18-a0cf-f081116ca962
+  clusterName: mlemieux-atg-eks
+  # registry: 368927449855.dkr.ecr.us-west-1.amazonaws.com
+
+newrelic-infrastructure:
+  privileged: true
+  integrations:
+    redis-config:
+      discovery:
+        command:
+          exec: /var/db/newrelic-infra/nri-discovery-kubernetes --tls --port 10250
+          match:
+            label.app: redis
+      integrations:
+        - name: nri-redis
+          env:
+            # using the discovered IP as the hostname address
+            HOSTNAME: ${discovery.ip}
+            PORT: 6379
+            # KEYS: '{"0":["<KEY_1>"],"1":["<KEY_2>"]}'
+            REMOTE_MONITORING: true
+    mongodb-config:
+      discovery:
+        command:
+          exec: /var/db/newrelic-infra/nri-discovery-kubernetes --tls --port 10250
+          match:
+            label.app.kubernetes.io/name: mongodb
+      integrations:
+        - name: nri-mongodb
+          env:
+            HOST: ${discovery.ip}
+            PORT: 27017
+            USERNAME: username
+            PASSWORD: password
+            MONGODB_CLUSTER_NAME: mlemieux-mongodb-cluster
+    postgresql-config:
+      discovery:
+        command:
+          exec: /var/db/newrelic-infra/nri-discovery-kubernetes --tls --port 10255
+          match:
+            label.app.kubernetes.io/name: postgresql
+            # label.app: postgresql
+      integrations:
+        - name: nri-postgresql
+          env:
+            USERNAME: newrelic
+            PASSWORD: password
+            HOSTNAME: ${discovery.ip}
+            PORT: 5432
+            COLLECTION_LIST: '["postgres"]'
+
+            COLLECT_DB_LOCK_METRICS: false
+            ENABLE_SSL: true
+            TRUST_SERVER_CERTIFICATE: false
+            SSL_ROOT_CERT_LOCATION: /etc/newrelic-infra/root_cert.crt
+            SSL_CERT_LOCATION: /etc/newrelic-infra/postgresql.crt
+            SSL_KEY_LOCATION: /etc/newrelic-infra/postgresql.key
+            TIMEOUT: 10
+
+            CUSTOM_METRICS_QUERY: >-
+              select
+                'rows_inserted' as "metric_name",
+                'delta' as "metric_type",
+                sd.tup_inserted as "metric_value",
+                sd.datid as "database_id"
+              from pg_stat_database sd;
+          labels:
+            env: production
+            role: postgresql
+newrelic-logging:
+  fluentBit:
+    logLevel: "debug"
