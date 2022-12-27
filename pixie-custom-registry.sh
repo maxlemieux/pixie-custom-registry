@@ -51,6 +51,12 @@ fi
 echo "Creating and populating container repositories"
 # Create the repositories using the naming convention defined by Pixie
 # https://docs.pixielabs.ai/reference/admin/deploy-options#custom-image-registry-collect-the-vizier-images
+if $USE_ETCD_OPERATOR; then
+    VIZIER_IMAGE_LIST=yamls/images/vizier_etcd_image_list.txt
+else
+    VIZIER_IMAGE_LIST=yamls/images/vizier_image_list.txt
+fi
+
 while read -r i
 do  
     echo "$i" | xargs docker pull >> /dev/null 2>&1
