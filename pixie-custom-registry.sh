@@ -51,7 +51,7 @@ fi
 echo "Creating and populating container repositories"
 # Create the repositories using the naming convention defined by Pixie
 # https://docs.pixielabs.ai/reference/admin/deploy-options#custom-image-registry-collect-the-vizier-images
-if $USE_ETCD_OPERATOR; then
+if [ "$USE_ETCD_OPERATOR" = "1" ]; then
     VIZIER_IMAGE_LIST=yamls/images/vizier_etcd_image_list.txt
 else
     VIZIER_IMAGE_LIST=yamls/images/vizier_image_list.txt
@@ -79,8 +79,7 @@ do
 
     docker tag "$PIXIE_IMAGE_ID" "$REGISTRY_URL"/"$CUSTOM_IMAGE_NAME":"$IMAGE_VERSION" >> /dev/null 2>&1
     docker push "$REGISTRY_URL"/"$CUSTOM_IMAGE_NAME":"$IMAGE_VERSION" >> /dev/null 2>&1
-done < yamls/images/vizier_image_list.txt
-#done
+done < "$VIZIER_IMAGE_LIST"
 
 #####
 # OPM
@@ -89,19 +88,42 @@ done < yamls/images/vizier_image_list.txt
 echo "Building operator bundle"
 opm index export --index gcr.io/pixie-oss/pixie-prod/operator/bundle_index:0.0.1 >> /dev/null 2>&1
 
-# Get the latest version number (e.g. 0.0.32):
+# Get the latest version number (e.g. 0.0.34):
 PIXIE_OPERATOR_VERSION=$(grep -A1 stable -m 1 downloaded/pixie-operator/package.yaml | grep current | cut -f 2 -d 'v')
 echo "Got Pixie Operator version $PIXIE_OPERATOR_VERSION"
+
+# UNUSED - keep - Set ClusterServiceVersion source file depending on use of etcd operator
+#if [ "$USE_ETCD_OPERATOR" = "1" ]; then
+#    CSV_FILE_NAME=csv.yaml-e
+#else
+#    CSV_FILE_NAME=csv.yaml
+#fi
 
 # Delete the replaces line (this is for Mac using BSD sed, use sed -i '/replaces/d' on Linux):
 sed -i '' '/replaces/d' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
+# Set up operator image repo (used by vizier-operator pod in px-operator namespace)
+OPERATOR_IMAGE_REPO=gcr.io-pixie-oss-pixie-prod-operator-operator_image
+
 # Check for the image attribute to be replaced with the custom repo URL:
-# e.g. - image: gcr.io/pixie-oss/pixie-prod/operator/operator_image:0.0.32
+# e.g. - image: gcr.io/pixie-oss/pixie-prod/operator/operator_image:0.0.34
 IMAGE_TO_REPLACE=$(grep image ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml | cut -f 4 -w)
-sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' \
+sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/"$OPERATOR_IMAGE_REPO"@g' \
     ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
+if aws ecr describe-repositories --no-cli-pager --repository-name "$OPERATOR_IMAGE_REPO" >> /dev/null 2>&1; then
+    warn_repo_exists
+else
+    aws ecr create-repository --no-cli-pager --repository-name "$OPERATOR_IMAGE_REPO" >> /dev/null 2>&1
+fi
+
+docker pull gcr.io/pixie-oss/pixie-prod/operator/operator_image:$PIXIE_OPERATOR_VERSION
+OPERATOR_IMAGE_ID=$(docker images | grep operator_image | cut -f 3 -w | tail -1)
+docker tag "$OPERATOR_IMAGE_ID" "$REGISTRY_URL"/"$OPERATOR_IMAGE_REPO":"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
+docker push "$REGISTRY_URL"/"$OPERATOR_IMAGE_REPO":"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
+
+
+# Create bundle repo
 # Replace this if you don't use AWS ECR
 aws ecr create-repository --repository-name bundle >> /dev/null 2>&1
 
@@ -112,15 +134,16 @@ docker build -t "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" -f bundle.Docke
 docker push "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
 
 # Create bundle index, repo for bundle index, and push the image
-opm index add --bundles "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" \
-    --tag "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 -u docker >> /dev/null 2>&1
 OPERATOR_BUNDLE_REPO=gcr.io-pixie-oss-pixie-prod-operator-bundle_index
+
+opm index add --bundles "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" \
+    --tag "$REGISTRY_URL"/"$OPERATOR_BUNDLE_REPO":0.0.1 -u docker >> /dev/null 2>&1
 if aws ecr describe-repositories --no-cli-pager --repository-name "$OPERATOR_BUNDLE_REPO" >> /dev/null 2>&1; then
     warn_repo_exists
 else
     aws ecr create-repository --no-cli-pager --repository-name "$OPERATOR_BUNDLE_REPO" >> /dev/null 2>&1
 fi
-docker push "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 >> /dev/null 2>&1
+docker push "$REGISTRY_URL"/"$OPERATOR_BUNDLE_REPO":0.0.1 >> /dev/null 2>&1
 
 echo "Building dependencies"
 # And finally, install these dependencies
