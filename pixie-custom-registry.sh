@@ -92,13 +92,6 @@ opm index export --index gcr.io/pixie-oss/pixie-prod/operator/bundle_index:0.0.1
 PIXIE_OPERATOR_VERSION=$(grep -A1 stable -m 1 downloaded/pixie-operator/package.yaml | grep current | cut -f 2 -d 'v')
 echo "Got Pixie Operator version $PIXIE_OPERATOR_VERSION"
 
-# UNUSED - keep - Set ClusterServiceVersion source file depending on use of etcd operator
-#if [ "$USE_ETCD_OPERATOR" = "1" ]; then
-#    CSV_FILE_NAME=csv.yaml-e
-#else
-#    CSV_FILE_NAME=csv.yaml
-#fi
-
 # Delete the replaces line (this is for Mac using BSD sed, use sed -i '/replaces/d' on Linux):
 sed -i '' '/replaces/d' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
@@ -108,7 +101,7 @@ OPERATOR_IMAGE_REPO=gcr.io-pixie-oss-pixie-prod-operator-operator_image
 # Check for the image attribute to be replaced with the custom repo URL:
 # e.g. - image: gcr.io/pixie-oss/pixie-prod/operator/operator_image:0.0.34
 IMAGE_TO_REPLACE=$(grep image ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml | cut -f 4 -w)
-sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/"$OPERATOR_IMAGE_REPO"@g' \
+sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' \
     ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
 if aws ecr describe-repositories --no-cli-pager --repository-name "$OPERATOR_IMAGE_REPO" >> /dev/null 2>&1; then
@@ -177,6 +170,7 @@ CONFIGMAP_IMAGE_ID=$(docker images | grep "configmap-operator-registry" | cut -f
 docker tag "$CONFIGMAP_IMAGE_ID" "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
 docker push "$REGISTRY_URL"/quay.io-operator-framework-configmap-operator-registry:latest >> /dev/null 2>&1
 
+echo "Completed."
 
 #########
 # CLEANUP  
