@@ -99,18 +99,21 @@ sed -i '' '/replaces/d' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/cs
 # Check for the image attribute to be replaced with the custom repo URL:
 # e.g. - image: gcr.io/pixie-oss/pixie-prod/operator/operator_image:0.0.32
 IMAGE_TO_REPLACE=$(grep image ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml | cut -f 4 -w)
-sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
+sed -i -e 's@'"$IMAGE_TO_REPLACE"'@'"$REGISTRY_URL"'/gcr.io-pixie-oss-pixie-prod-operator-operator_image@g' \
+    ./downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION"/csv.yaml
 
 # Replace this if you don't use AWS ECR
 aws ecr create-repository --repository-name bundle >> /dev/null 2>&1
 
 # Building and pushing operator images to the custom registry
-opm alpha bundle generate --package pixie-operator --channels stable --default stable --directory downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
+opm alpha bundle generate --package pixie-operator --channels stable --default stable \
+    --directory downloaded/pixie-operator/"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
 docker build -t "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" -f bundle.Dockerfile . >> /dev/null 2>&1
 docker push "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" >> /dev/null 2>&1
 
 # Create bundle index, repo for bundle index, and push the image
-opm index add --bundles "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" --tag "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 -u docker >> /dev/null 2>&1
+opm index add --bundles "$REGISTRY_URL"/bundle:"$PIXIE_OPERATOR_VERSION" \
+    --tag "$REGISTRY_URL"/gcr.io-pixie-oss-pixie-prod-operator-bundle_index:0.0.1 -u docker >> /dev/null 2>&1
 OPERATOR_BUNDLE_REPO=gcr.io-pixie-oss-pixie-prod-operator-bundle_index
 if aws ecr describe-repositories --no-cli-pager --repository-name "$OPERATOR_BUNDLE_REPO" >> /dev/null 2>&1; then
     warn_repo_exists
