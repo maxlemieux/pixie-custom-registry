@@ -10,8 +10,10 @@ What this script does not do: It does not create ECR registries. You will need a
 
 ### Requirements
 * Tested with AWS ECR, running on MacOS 12.6 with zsh. Current Pixie version is 0.0.32.
-* One available AWS ECR registry.
+* Authenticated to an available AWS ECR registry: https://docs.aws.amazon.com/AmazonECR/latest/userguide/getting-started-cli.html#cli-authenticate-registry
 * A shell to run the script, and permission to write to the current directory.
+* Logged into Docker (`docker login` or Docker Desktop)
+* Authenticated to AWS ECR
 
 ### Usage
 
